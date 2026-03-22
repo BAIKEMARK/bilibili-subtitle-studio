@@ -107,7 +107,7 @@ def auto_get_cookie():
             print(f"bili_jct: {bili_jct}")
             print(f"\n已保存到: cookie.txt")
             print("\n现在可以运行字幕提取工具了！")
-            print("  python 字幕.py")
+            print("  python subtitle_extractor.py")
         else:
             print("\n❌ 未找到必要的Cookie")
             print("请确保已经完成登录")

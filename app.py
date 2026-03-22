@@ -6,7 +6,7 @@ from contextlib import redirect_stdout
 
 import streamlit as st
 
-import 字幕 as core
+import subtitle_extractor as core
 
 try:
     from streamlit_cookies_manager import EncryptedCookieManager

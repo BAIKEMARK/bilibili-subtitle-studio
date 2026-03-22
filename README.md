@@ -38,11 +38,11 @@
 
 2. 获取 Cookie（首次使用）
 
-   python auto_get_cookie.py
+   python cookie_auto_login.py
 
 3. 提取字幕
 
-   python 字幕.py
+   python subtitle_extractor.py
 
 ## Streamlit Community Cloud 部署（GitHub）
 
@@ -50,7 +50,7 @@
 
 确保仓库包含以下文件：
 - app.py
-- 字幕.py
+- subtitle_extractor.py
 - requirements.txt
 - .gitignore
 
@@ -72,18 +72,18 @@
 
 B站字幕提取工具/
 - app.py                    # Streamlit 可视化入口
-- 字幕.py                   # 主程序（核心提取逻辑）
-- auto_get_cookie.py        # Cookie 自动获取工具
+- subtitle_extractor.py     # 主程序（核心提取逻辑）
+- cookie_auto_login.py      # Cookie 自动获取工具
 - requirements.txt          # 依赖列表
 - cookie.txt                # 本地 Cookie 文件（不提交）
 - README.md                 # 项目说明
-- 开始使用.md               # 快速开始指南
+- quick_start.md            # 快速开始指南
 - {BVID}_字幕.txt           # 字幕输出文件
 
 ## 常见问题
 
 Q: 提示账号未登录怎么办？
-A: 运行 python auto_get_cookie.py 获取新的 Cookie。
+A: 运行 python cookie_auto_login.py 获取新的 Cookie。
 
 Q: Cookie 有效期多久？
 A: 通常 30 天左右，过期后重新获取即可。
@@ -91,7 +91,7 @@ A: 通常 30 天左右，过期后重新获取即可。
 Q: 视频有字幕但提取失败怎么办？
 A:
 1. 确认是软字幕（可切换），不是硬字幕（嵌入画面）
-2. 刷新 Cookie：python auto_get_cookie.py
+2. 刷新 Cookie：python cookie_auto_login.py
 3. 使用手动 JSON 模式
 
 Q: 出现Cookie 可能失效或权限不足怎么办？
