@@ -35,6 +35,7 @@ Thumbs.db
 cookie.txt
 *.env
 .env
+.streamlit/secrets.toml
 
 # Local runtime outputs
 *_字幕.txt
