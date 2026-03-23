@@ -7,8 +7,10 @@ import hashlib
 import os
 from urllib.parse import urlencode
 
-# 设置标准输出编码为UTF-8，避免Windows控制台编码问题
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# 仅在非导入模式下（直接运行脚本）强制设置UTF-8输出，避免Windows控制台乱码
+if __name__ == "__main__":
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # WBI签名缓存
 _wbi_keys_cache = None
@@ -171,16 +173,67 @@ def generate_wbi_signature(params, wbi_keys):
 
     return urlencode(params_sorted)
 
-def get_bilibili_subtitle(bvid, prefer_ai=True):
+
+def format_time_srt(seconds):
+    """Format seconds (float) to SRT timestamp: 00:00:00,000"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds - int(seconds)) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+def format_time_vtt(seconds):
+    """Format seconds (float) to VTT timestamp: 00:00:00.000"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds - int(seconds)) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+def generate_srt(subtitles):
+    """Generate SRT content from subtitle list"""
+    lines = []
+    for i, sub in enumerate(subtitles, 1):
+        if 'from' not in sub or 'to' not in sub:
+            continue
+        start = format_time_srt(float(sub['from']))
+        end = format_time_srt(float(sub['to']))
+        content = sub['content']
+        lines.append(f"{i}\n{start} --> {end}\n{content}\n")
+    return "\n".join(lines)
+
+def generate_vtt(subtitles):
+    """Generate VTT content from subtitle list"""
+    lines = ["WEBVTT\n"]
+    for sub in subtitles:
+        if 'from' not in sub or 'to' not in sub:
+            continue
+        start = format_time_vtt(float(sub['from']))
+        end = format_time_vtt(float(sub['to']))
+        content = sub['content']
+        lines.append(f"{start} --> {end}\n{content}\n")
+    return "\n".join(lines)
+
+def generate_txt(subtitles):
+    """Generate TXT content from subtitle list"""
+    return "\n".join(sub['content'] for sub in subtitles)
+
+def get_bilibili_subtitle(bvid, prefer_ai=True, return_raw=False):
     """
     获取B站视频字幕
 
     Args:
         bvid: 视频的BVID
         prefer_ai: 是否优先使用AI字幕（默认True）
+        return_raw: 是否返回原始字幕数据列表（字典列表），默认为False（返回拼接文本）
 
     Returns:
-        字幕文本字符串，如果失败则返回错误信息
+        如果 return_raw=False (默认):
+            字幕文本字符串，如果失败则返回错误信息(❌开头)
+        如果 return_raw=True:
+            (字幕列表, 错误信息) 的元组。
+            成功时: (list, None)
+            失败时: (None, error_msg)
     """
     # 获取带Cookie的请求头
     headers = get_headers_with_cookie(bvid)
@@ -192,90 +245,100 @@ def get_bilibili_subtitle(bvid, prefer_ai=True):
         res_cid = requests.get(url_cid, headers=headers, timeout=10).json()
 
         if res_cid['code'] != 0:
-            return f"❌ 获取视频信息失败：{res_cid.get('message', '未知错误')}"
+            msg = f"❌ 获取视频信息失败：{res_cid.get('message', '未知错误')}"
+            return (None, msg) if return_raw else msg
 
         cid = res_cid['data'][0]['cid']
         print(f"✅ 获取到 cid: {cid}")
+
+        body = None
 
         # 第二步：尝试获取 AI 字幕（如果优先）
         if prefer_ai:
             print("🔍 正在查找 AI 字幕...")
             # 尝试多个可能的AI字幕接口
-            subtitle_text = _get_ai_subtitle(bvid, cid, headers)
-            if subtitle_text:
+            body = _get_ai_subtitle(bvid, cid, headers)
+            if body:
                 print("✅ 成功获取 AI 字幕")
-                return subtitle_text
             else:
                 print("⚠️  未找到 AI 字幕，尝试查找 CC 字幕...")
 
-        # 第三步：获取 CC 字幕（手动上传的字幕）
-        print("🔍 正在查找 CC 字幕...")
-        url_info = f"https://api.bilibili.com/x/player/v2?bvid={bvid}&cid={cid}"
-        res_info = requests.get(url_info, headers=headers, timeout=10).json()
+        # 第三步：获取 CC 字幕（手动上传的字幕）或当AI字幕失败时
+        if not body:
+            print("🔍 正在查找 CC 字幕...")
+            url_info = f"https://api.bilibili.com/x/player/v2?bvid={bvid}&cid={cid}"
+            res_info = requests.get(url_info, headers=headers, timeout=10).json()
 
-        # 检查是否有字幕
-        subtitles = res_info['data'].get('subtitle', {}).get('subtitles', [])
-        if not subtitles:
-            auth_hint = _build_auth_hint(api_response=res_info, subtitles=subtitles)
-            return "❌ 该视频没有提供字幕（包括 AI 字幕和 CC 字幕）。\n   提示：如果是嵌入视频画面内的硬字幕，需要使用 OCR 工具提取。\n   如果视频有AI字幕，请配置cookie.txt文件以登录B站账号。" + auth_hint
-
-        # 显示可用字幕列表
-        print(f"📝 找到 {len(subtitles)} 个字幕")
-        for idx, sub in enumerate(subtitles):
-            lang = sub.get('lan_doc') or sub.get('lan') or sub.get('lang') or '未知'
-            print(f"   [{idx}] {lang}")
-
-        # 第四步：下载第一个字幕（通常是中文）
-        sub_url = subtitles[0].get('subtitle_url') or subtitles[0].get('subtitle_url_v2', '')
-
-        # 如果subtitle_url为空，尝试用其他方式获取AI字幕
-        if not sub_url or sub_url == '':
-            print("   ⚠️  字幕URL为空，尝试使用备用方式获取AI字幕...")
-            try:
-                # 新版接口里，AI字幕URL通常出现在x/player/wbi/v2的subtitle字段
-                fallback_url = f"https://api.bilibili.com/x/player/wbi/v2?bvid={bvid}&cid={cid}"
-                fallback_response = requests.get(fallback_url, headers=headers, timeout=10)
-                if fallback_response.status_code == 200:
-                    fallback_data = fallback_response.json()
-                    fallback_subs = fallback_data.get('data', {}).get('subtitle', {}).get('subtitles', [])
-                    if fallback_subs:
-                        sub_url = fallback_subs[0].get('subtitle_url') or fallback_subs[0].get('subtitle_url_v2', '')
-            except Exception:
-                pass
-
-            if not sub_url:
+            # 检查是否有字幕
+            subtitles = res_info['data'].get('subtitle', {}).get('subtitles', [])
+            if not subtitles:
                 auth_hint = _build_auth_hint(api_response=res_info, subtitles=subtitles)
-                return "❌ 无法获取字幕URL，该视频的AI字幕可能无法通过API访问。\n   提示：可以使用模式3手动从浏览器F12复制字幕JSON。" + auth_hint
+                msg = "❌ 该视频没有提供字幕（包括 AI 字幕和 CC 字幕）。\n   提示：如果是嵌入视频画面内的硬字幕，需要使用 OCR 工具提取。\n   如果视频有AI字幕，请配置cookie.txt文件以登录B站账号。" + auth_hint
+                return (None, msg) if return_raw else msg
 
-        if sub_url.startswith('//'):
-            sub_url = 'https:' + sub_url
+            # 显示可用字幕列表
+            print(f"📝 找到 {len(subtitles)} 个字幕")
+            for idx, sub in enumerate(subtitles):
+                lang = sub.get('lan_doc') or sub.get('lan') or sub.get('lang') or '未知'
+                print(f"   [{idx}] {lang}")
 
-        print(f"⬇️  正在下载字幕...")
-        res_sub = requests.get(sub_url, headers=headers, timeout=10).json()
-        body = res_sub['body']
+            # 第四步：下载第一个字幕（通常是中文）
+            sub_url = subtitles[0].get('subtitle_url') or subtitles[0].get('subtitle_url_v2', '')
 
-        # 提取每一句字幕并拼接
-        text_list = [item['content'] for item in body]
-        result = "\n".join(text_list)
-        print(f"✅ 成功获取 {len(text_list)} 条字幕")
+            # 如果subtitle_url为空，尝试用其他方式获取AI字幕
+            if not sub_url or sub_url == '':
+                print("   ⚠️  字幕URL为空，尝试使用备用方式获取AI字幕...")
+                try:
+                    # 新版接口里，AI字幕URL通常出现在x/player/wbi/v2的subtitle字段
+                    fallback_url = f"https://api.bilibili.com/x/player/wbi/v2?bvid={bvid}&cid={cid}"
+                    fallback_response = requests.get(fallback_url, headers=headers, timeout=10)
+                    if fallback_response.status_code == 200:
+                        fallback_data = fallback_response.json()
+                        fallback_subs = fallback_data.get('data', {}).get('subtitle', {}).get('subtitles', [])
+                        if fallback_subs:
+                            sub_url = fallback_subs[0].get('subtitle_url') or fallback_subs[0].get('subtitle_url_v2', '')
+                except Exception:
+                    pass
+
+                if not sub_url:
+                    auth_hint = _build_auth_hint(api_response=res_info, subtitles=subtitles)
+                    msg = "❌ 无法获取字幕URL，该视频的AI字幕可能无法通过API访问。\n   提示：可以使用模式3手动从浏览器F12复制字幕JSON。" + auth_hint
+                    return (None, msg) if return_raw else msg
+
+            if sub_url.startswith('//'):
+                sub_url = 'https:' + sub_url
+
+            print(f"⬇️  正在下载字幕...")
+            res_sub = requests.get(sub_url, headers=headers, timeout=10).json()
+            body = res_sub['body']
+
+        # 结果处理
+        print(f"✅ 成功获取 {len(body)} 条字幕")
+        
+        if return_raw:
+            return body, None
+        
+        # 默认返回纯文本，兼容旧逻辑
+        result = generate_txt(body)
         return result
 
     except requests.exceptions.Timeout:
-        return "❌ 请求超时，请检查网络连接"
+        msg = "❌ 请求超时，请检查网络连接"
+        return (None, msg) if return_raw else msg
     except requests.exceptions.RequestException as e:
-        return f"❌ 网络请求失败：{str(e)}"
+        msg = f"❌ 网络请求失败：{str(e)}"
+        return (None, msg) if return_raw else msg
     except json.JSONDecodeError:
-        return "❌ 解析响应数据失败，API 可能已更新"
+        msg = "❌ 解析响应数据失败，API 可能已更新"
+        return (None, msg) if return_raw else msg
     except Exception as e:
-        return f"❌ 发生未知错误：{str(e)}"
+        msg = f"❌ 发生未知错误：{str(e)}"
+        return (None, msg) if return_raw else msg
 
 
 def _get_ai_subtitle(bvid, cid, headers):
     """
-    获取 AI 自动生成的字幕
-
-    说明：旧接口 /x/player/wbi/v2/ai_subtitle 已失效，
-    这里改为从 /x/player/wbi/v2 的 subtitle 列表中提取可用URL。
+    获取 AI 自动生成的字幕 - 返回解析好的字幕列表
     """
     # 方法1: 从可用的播放器接口获取字幕URL并下载
     try:
@@ -293,8 +356,7 @@ def _get_ai_subtitle(bvid, cid, headers):
                     sub_url = 'https:' + sub_url
                 sub_response = requests.get(sub_url, headers=headers, timeout=10).json()
                 if 'body' in sub_response:
-                    text_list = [item['content'] for item in sub_response['body']]
-                    return "\n".join(text_list)
+                    return sub_response['body']
     except Exception:
         pass
 
@@ -315,35 +377,53 @@ def _get_ai_subtitle(bvid, cid, headers):
                         sub_url = 'https:' + sub_url
                     sub_response = requests.get(sub_url, headers=headers, timeout=10).json()
                     if 'body' in sub_response:
-                        text_list = [item['content'] for item in sub_response['body']]
-                        return "\n".join(text_list)
+                        return sub_response['body']
     except Exception:
         pass
 
     return None
 
 
+
+OUTPUT_DIR = "subtitles_output"
+
 def save_subtitle_to_file(text, filename="subtitle.txt"):
-    """将字幕保存到文件"""
+    """
+    将字幕保存到文件
+    
+    如果不包含路径，默认保存到 subtitles_output 文件夹
+    """
     try:
-        with open(filename, 'w', encoding='utf-8') as f:
+        # 如果是纯文件名（不含路径分隔符），则保存到默认输出目录
+        if os.sep not in filename:
+            # 确保输出目录存在
+            if not os.path.exists(OUTPUT_DIR):
+                os.makedirs(OUTPUT_DIR)
+            filepath = os.path.join(OUTPUT_DIR, filename)
+        else:
+            # 如果包含路径，直接使用该路径
+            # 同时也确保其父目录存在
+            parent_dir = os.path.dirname(filename)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir)
+            filepath = filename
+
+        with open(filepath, 'w', encoding='utf-8') as f:
             f.write(text)
-        print(f"💾 字幕已保存到 {filename}")
+        
+        # 获取绝对路径用于展示
+        abs_path = os.path.abspath(filepath)
+        print(f"💾 字幕已保存到: {abs_path}")
         return True
     except Exception as e:
         print(f"❌ 保存文件失败：{str(e)}")
         return False
 
 
-def parse_subtitle_json(json_text):
+
+def parse_subtitle_json(json_text, return_raw=False):
     """
     解析从浏览器F12复制的字幕JSON数据
-
-    使用方法：
-    1. 按F12打开开发者工具 → Network标签页
-    2. 刷新页面，搜索"subtitle"或"ai_subtitle"
-    3. 点击字幕请求 → Response标签页 → 复制完整JSON
-    4. 粘贴到这里
     """
     try:
         # 清理可能的多余字符
@@ -367,50 +447,76 @@ def parse_subtitle_json(json_text):
             body = data['data']['body']
 
         if body:
-            text_list = [item['content'] for item in body]
-            result = "\n".join(text_list)
-            print(f"✅ 成功解析 {len(text_list)} 条字幕")
+            print(f"✅ 成功解析 {len(body)} 条字幕")
+            if return_raw:
+                return body, None
+            
+            result = generate_txt(body)
             return result
         else:
-            print("❌ JSON中未找到body数据，请确认复制的是正确的字幕接口")
-            return None
+            msg = "❌ JSON中未找到body数据，请确认复制的是正确的字幕接口"
+            print(msg)
+            return (None, msg) if return_raw else msg
 
     except json.JSONDecodeError as e:
-        print(f"❌ JSON解析失败：{str(e)}")
-        print("   请确保复制了完整的JSON数据")
-        return None
+        msg = f"❌ JSON解析失败：{str(e)}\n   请确保复制了完整的JSON数据"
+        print(msg)
+        return (None, msg) if return_raw else None
     except Exception as e:
-        print(f"❌ 解析失败：{str(e)}")
-        return None
+        msg = f"❌ 解析失败：{str(e)}"
+        print(msg)
+        return (None, msg) if return_raw else None
 
 
-def batch_get_subtitles(bvid_list):
+def batch_get_subtitles(bvid_list, formats=None):
     """
     批量获取多个视频的字幕
 
     Args:
         bvid_list: BVID列表
+        formats: 要保存的格式列表，如 ['txt', 'srt', 'vtt']。如果不传则默认保存所有。
 
     Returns:
         字典，key为bvid，value为字幕文本或错误信息
     """
+    if formats is None:
+        formats = ['txt', 'srt', 'vtt']
+
     results = {}
     total = len(bvid_list)
 
     print(f"\n{'='*60}")
     print(f"开始批量获取 {total} 个视频的字幕")
+    print(f"目标格式: {', '.join(formats)}")
     print(f"{'='*60}\n")
 
     for idx, bvid in enumerate(bvid_list, 1):
         print(f"\n[{idx}/{total}] 处理视频: {bvid}")
         print("-" * 60)
 
-        subtitle = get_bilibili_subtitle(bvid, prefer_ai=True)
-        results[bvid] = subtitle
+        subtitle, error = get_bilibili_subtitle(bvid, prefer_ai=True, return_raw=True)
 
-        # 如果成功获取字幕，自动保存
-        if subtitle and not subtitle.startswith("❌"):
-            save_subtitle_to_file(subtitle, f"{bvid}_字幕.txt")
+        if subtitle:
+            base_name = f"{bvid}_字幕"
+            
+            # Save TXT
+            if 'txt' in formats:
+                txt = generate_txt(subtitle)
+                results[bvid] = txt
+                save_subtitle_to_file(txt, f"{base_name}.txt")
+            
+            # Save SRT
+            if 'srt' in formats:
+                srt = generate_srt(subtitle)
+                save_subtitle_to_file(srt, f"{base_name}.srt")
+
+            # Save VTT
+            if 'vtt' in formats:
+                vtt = generate_vtt(subtitle)
+                save_subtitle_to_file(vtt, f"{base_name}.vtt")
+        else:
+            results[bvid] = error
+            print(error)
 
         # 短暂延迟，避免请求过快
         if idx < total:

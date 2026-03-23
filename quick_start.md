@@ -1,6 +1,19 @@
 ﻿# Quick Start
 
-## First-time Setup
+## 🚀 Recommended Usage
+
+Run the unified tool (interactive menu):
+
+```bash
+python main.py
+```
+
+This script will:
+1. Automatically check your login status
+2. Guide you to login via QR code if needed
+3. Let you choose single/batch subtitle extraction
+
+## Manual Usage (Old Method)
 
 ### 1) Install dependencies
 

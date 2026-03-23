@@ -38,6 +38,7 @@ cookie.txt
 .streamlit/secrets.toml
 
 # Local runtime outputs
-*_字幕.txt
-subtitle.txt
 *.log
+
+# Generated subtitle outputs
+subtitles_output/

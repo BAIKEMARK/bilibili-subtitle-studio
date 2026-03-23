@@ -130,20 +130,60 @@ def init_browser_cookie_store():
     return store
 
 
-def render_result_block(title, content):
+def render_result_block(title, result):
     st.subheader(title)
+    
+    content = ""
+    raw_data = None
+    
+    # Check if result is (data, error) tuple from return_raw=True
+    if isinstance(result, tuple) and len(result) == 2:
+        raw_data, error = result
+        if error:
+            content = error
+        else:
+            # Generate TXT for display
+            content = core.generate_txt(raw_data)
+    else:
+        # Legacy string result
+        content = result
+
     if content and not content.startswith("❌"):
         st.success("字幕获取成功")
         st.text_area("字幕内容", content, height=260)
-        st.download_button(
-            label="下载字幕 TXT",
-            data=content,
-            file_name="subtitle.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.download_button(
+                label="📄 下载字幕 TXT",
+                data=content,
+                file_name="subtitle.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+        
+        if raw_data:
+            with col2:
+                srt_content = core.generate_srt(raw_data)
+                st.download_button(
+                    label="🌐 下载字幕 SRT",
+                    data=srt_content,
+                    file_name="subtitle.srt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+            with col3:
+                vtt_content = core.generate_vtt(raw_data)
+                st.download_button(
+                    label="📝 下载字幕 VTT",
+                    data=vtt_content,
+                    file_name="subtitle.vtt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
     else:
         st.error(content or "获取失败")
+
 
 
 def main():
@@ -234,13 +274,36 @@ def main():
                 st.warning("请先输入 BVID")
             else:
                 with st.spinner("正在获取字幕..."):
-                    result, logs = capture_run(core.get_bilibili_subtitle, bvid.strip(), prefer_ai)
-                render_result_block("结果", result)
-                if auto_save and result and not result.startswith("❌"):
+                    result_tuple, logs = capture_run(core.get_bilibili_subtitle, bvid.strip(), prefer_ai, return_raw=True)
+                
+                # Unpack tuple for auto-save logic
+                raw_data = None
+                content = None
+                if isinstance(result_tuple, tuple) and len(result_tuple) == 2:
+                    raw_data, error = result_tuple
+                    if raw_data:
+                        content = core.generate_txt(raw_data)
+                    else:
+                        content = error
+                else:
+                    content = result_tuple
+
+                render_result_block("结果", (raw_data, content) if raw_data else content)
+                
+                if auto_save and content and not content.startswith("❌"):
                     filename = f"{bvid.strip()}_字幕.txt"
-                    ok, _ = capture_run(core.save_subtitle_to_file, result, filename)
+                    ok, _ = capture_run(core.save_subtitle_to_file, content, filename)
                     if ok:
-                        st.info(f"已保存到: {os.path.abspath(filename)}")
+                        # 构造正确的显示路径 (因为core.save_subtitle_to_file可能会修改保存位置)
+                        display_path = os.path.join(core.OUTPUT_DIR, filename)
+                        st.info(f"已保存到: {os.path.abspath(display_path)}")
+                    if raw_data:
+                        # Auto save other formats
+                        srt_content = core.generate_srt(raw_data)
+                        capture_run(core.save_subtitle_to_file, srt_content, f"{bvid.strip()}_字幕.srt")
+                        vtt_content = core.generate_vtt(raw_data)
+                        capture_run(core.save_subtitle_to_file, vtt_content, f"{bvid.strip()}_字幕.vtt")
+
                 with st.expander("查看运行日志"):
                     st.code(logs or "(无日志)")
 
@@ -263,17 +326,36 @@ def main():
                 progress = st.progress(0)
 
                 for idx, item in enumerate(bvid_list, 1):
-                    result, logs = capture_run(core.get_bilibili_subtitle, item, prefer_ai)
+                    # 改用return_raw=True以获取多格式数据
+                    result_tuple, logs = capture_run(core.get_bilibili_subtitle, item, prefer_ai, return_raw=True)
                     all_logs.append(f"==== {item} ====\n{logs}")
-                    ok = bool(result and not result.startswith("❌"))
+                    
+                    raw_data = None
+                    content = None
+                    if isinstance(result_tuple, tuple) and len(result_tuple) == 2:
+                        raw_data, error = result_tuple
+                        if raw_data:
+                            content = core.generate_txt(raw_data)
+                        else:
+                            content = error
+                    else:
+                        content = result_tuple
+
+                    ok = bool(content and not content.startswith("❌"))
                     rows.append({
                         "BVID": item,
                         "状态": "成功" if ok else "失败",
-                        "信息": (result[:120] + "...") if result and len(result) > 120 else (result or ""),
+                        "信息": (content[:120] + "...") if content and len(content) > 120 else (content or ""),
                     })
 
                     if auto_save and ok:
-                        capture_run(core.save_subtitle_to_file, result, f"{item}_字幕.txt")
+                        # 保存三种格式
+                        capture_run(core.save_subtitle_to_file, content, f"{item}_字幕.txt")
+                        if raw_data:
+                            srt = core.generate_srt(raw_data)
+                            capture_run(core.save_subtitle_to_file, srt, f"{item}_字幕.srt")
+                            vtt = core.generate_vtt(raw_data)
+                            capture_run(core.save_subtitle_to_file, vtt, f"{item}_字幕.vtt")
 
                     progress.progress(idx / len(bvid_list))
 
@@ -290,8 +372,21 @@ def main():
             if not json_text.strip():
                 st.warning("请先粘贴 JSON")
             else:
-                result, logs = capture_run(core.parse_subtitle_json, json_text)
-                render_result_block("解析结果", result)
+                result_tuple, logs = capture_run(core.parse_subtitle_json, json_text, return_raw=True)
+                
+                # Unpack
+                raw_data = None
+                content = None
+                if isinstance(result_tuple, tuple) and len(result_tuple) == 2:
+                    raw_data, error = result_tuple
+                    if raw_data:
+                        content = core.generate_txt(raw_data)
+                    else:
+                        content = error
+                else:
+                    content = result_tuple
+
+                render_result_block("解析结果", (raw_data, content) if raw_data else content)
                 with st.expander("查看解析日志"):
                     st.code(logs or "(无日志)")
 
