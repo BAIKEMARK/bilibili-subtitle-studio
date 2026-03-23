@@ -9,26 +9,27 @@ echo ========================================
 
 REM 1. 检测 Python
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] 未检测到 Python，请先安装 Python 并添加到 PATH 环境变量。
-    pause
-    exit /b 1
+pip install -r requirements.txt --disable-pip-version-check
+if %errorlevel% neq 0 echo [WARN] 依赖安装失败，尝试继续...
+
+echo.
+echo =====================
+echo  请选择运行模式:
+echo  1. [命令行 CLI] - 默认
+echo  2. [网页 WebUI]
+echo =====================
+set /p mode="请输入选项 [1/2]: "
+
+if "%mode%"=="2" (
+    echo [INFO] 正在启动 Streamlit Web 界面...
+    streamlit run app.py
+) else (
+    echo [INFO] 正在启动命令行工具...
+    python main.py
 )
-
-REM 2. 创建虚拟环境
-if not exist ".venv" (
-    echo [INFO] 正在创建虚拟环境 (.venv)...
-    python -m venv .venv
-)
-
-call .venv\Scripts\activate.bat
-echo [INFO] 正在检查依赖...
-pip install -r requirements.txt
-
-python main.py
 
 if %errorlevel% neq 0 (
     echo.
-    echo [注意] 程序运行结束或异常退出
+    echo [注意] 程序运行异常或被终止
     pause
 )

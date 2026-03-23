@@ -387,6 +387,30 @@ def _get_ai_subtitle(bvid, cid, headers):
 
 OUTPUT_DIR = "subtitles_output"
 
+
+def save_subtitle_bundle(subtitles, bvid, output_dir=OUTPUT_DIR):
+    """按 BVID 目录保存 TXT/SRT/VTT 三种字幕格式。"""
+    if not subtitles:
+        return False, "", []
+
+    safe_bvid = (bvid or "unknown").strip() or "unknown"
+    target_dir = os.path.join(output_dir, safe_bvid)
+
+    files = {
+        f"{safe_bvid}.txt": generate_txt(subtitles),
+        f"{safe_bvid}.srt": generate_srt(subtitles),
+        f"{safe_bvid}.vtt": generate_vtt(subtitles),
+    }
+
+    failed = []
+    for filename, content in files.items():
+        filepath = os.path.join(target_dir, filename)
+        ok = save_subtitle_to_file(content, filepath)
+        if not ok:
+            failed.append(filepath)
+
+    return len(failed) == 0, os.path.abspath(target_dir), failed
+
 def save_subtitle_to_file(text, filename="subtitle.txt"):
     """
     将字幕保存到文件
@@ -497,23 +521,21 @@ def batch_get_subtitles(bvid_list, formats=None):
         subtitle, error = get_bilibili_subtitle(bvid, prefer_ai=True, return_raw=True)
 
         if subtitle:
-            base_name = f"{bvid}_字幕"
-            
-            # Save TXT
-            if 'txt' in formats:
-                txt = generate_txt(subtitle)
-                results[bvid] = txt
-                save_subtitle_to_file(txt, f"{base_name}.txt")
-            
-            # Save SRT
-            if 'srt' in formats:
-                srt = generate_srt(subtitle)
-                save_subtitle_to_file(srt, f"{base_name}.srt")
+            results[bvid] = generate_txt(subtitle)
 
-            # Save VTT
-            if 'vtt' in formats:
-                vtt = generate_vtt(subtitle)
-                save_subtitle_to_file(vtt, f"{base_name}.vtt")
+            if set(formats) >= {"txt", "srt", "vtt"}:
+                save_subtitle_bundle(subtitle, bvid)
+            else:
+                base_name = f"{bvid}_字幕"
+                if 'txt' in formats:
+                    txt = generate_txt(subtitle)
+                    save_subtitle_to_file(txt, f"{base_name}.txt")
+                if 'srt' in formats:
+                    srt = generate_srt(subtitle)
+                    save_subtitle_to_file(srt, f"{base_name}.srt")
+                if 'vtt' in formats:
+                    vtt = generate_vtt(subtitle)
+                    save_subtitle_to_file(vtt, f"{base_name}.vtt")
         else:
             results[bvid] = error
             print(error)

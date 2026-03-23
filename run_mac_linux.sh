@@ -33,8 +33,20 @@ source .venv/bin/activate
 echo "正在检查依赖更新..."
 pip install -r requirements.txt --disable-pip-version-check
 
-# 运行主程序
-python main.py
+# 提供运行选项
+echo "请选择运行模式:"
+echo "1. 🖥️  命令行模式 (CLI) - 默认"
+echo "2. 🌐 网页界面模式 (Web UI)"
+read -p "请输入选项 [1-2]: " choice
+
+if [ "$choice" == "2" ]; then
+    echo "正在启动网页界面..."
+    echo "提示: 按 Ctrl+C 停止运行"
+    streamlit run app.py
+else
+    echo "正在启动命令行工具..."
+    python main.py
+fi
 
 # 退出前暂停一下（防止终端直接关闭看不到报错）
 if [ $? -ne 0 ]; then
