@@ -456,7 +456,7 @@ def main():
 
     with tab_single:
         st.subheader("单个视频获取")
-        bvid = st.text_input("输入 BVID", value="BV1ZL411o7LZ")
+        bvid = st.text_input("输入 BVID", value="", placeholder="例如：BV1ZL411o7LZ")
 
         if "single_result_state" not in st.session_state:
             st.session_state["single_result_state"] = None
@@ -548,7 +548,8 @@ def main():
         st.subheader("批量获取字幕")
         raw_input = st.text_area(
             "输入多个 BVID（空格/逗号/换行分隔）",
-            value="BV1ZL411o7LZ\nBV1fT411B7od\nBV1Fk4y1v7fQ",
+            value="",
+            placeholder="例如：BV1ZL411o7LZ\nBV1fT411B7od\nBV1Fk4y1v7fQ",
             height=120,
         )
 
