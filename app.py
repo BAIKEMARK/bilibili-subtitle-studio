@@ -499,17 +499,50 @@ def main():
                 (current_raw_data, current_content) if current_raw_data else current_content,
                 key_prefix="single_result",
             )
+            
+            # --- 一键下载 / 保存 ---
+            if current_raw_data and current_bvid:
+                st.caption("分格式下载见上方预览区，或使用下方按钮批量操作：")
+                col_save_action = st.container()
+                
+                # 本地模式：提供保存到本地目录的功能
+                if is_local:
+                    if col_save_action.button("📂 保存到本地目录（TXT + SRT + VTT）", use_container_width=True, type="primary"):
+                        ok, save_dir, failed = core.save_subtitle_bundle(current_raw_data, current_bvid)
+                        if ok:
+                            st.success(f"已保存到: {save_dir}")
+                        else:
+                            st.error(f"保存失败，目录: {save_dir}，失败文件数: {len(failed)}")
+                
+                # Web模式（或通用）：提供打包下载功能
+                else:
+                    # 将单个视频的数据打包成 {bvid: data} 形式供 build_subtitle_zip 使用
+                    single_batch_data = {current_bvid: current_raw_data}
+                    
+                    # 我们需要打包 txt, srt, vtt 三种格式
+                    # 为了方便，我们可以循环生成三个文件的 ZIP 或者直接把三个文件通过 zipfile 打包
+                    # 这里复用 build_subtitle_zip 有点麻烦，因为它一次只打一种格式
+                    # 所以我们在下面手动构建一个包含三格式的 ZIP
+                    
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        zf.writestr(f"{current_bvid}.txt", core.generate_txt(current_raw_data))
+                        zf.writestr(f"{current_bvid}.srt", core.generate_srt(current_raw_data))
+                        zf.writestr(f"{current_bvid}.vtt", core.generate_vtt(current_raw_data))
+                    
+                    zip_data = zip_buffer.getvalue()
+                    
+                    col_save_action.download_button(
+                        label="📦 一键下载所有格式 (ZIP)",
+                        data=zip_data,
+                        file_name=f"{current_bvid}_all_formats.zip",
+                        mime="application/zip",
+                        use_container_width=True,
+                        type="primary"
+                    )
 
             with st.expander("查看运行日志"):
                 st.code(current_logs or "(无日志)")
-
-        if single_state and single_state.get("bvid") and single_state.get("raw_data"):
-            if st.button("一剑保存所有字幕到本地（TXT/SRT/VTT）", use_container_width=True):
-                ok, save_dir, failed = core.save_subtitle_bundle(single_state.get("raw_data"), single_state.get("bvid"))
-                if ok:
-                    st.success(f"已保存到: {save_dir}")
-                else:
-                    st.error(f"保存失败，目录: {save_dir}，失败文件数: {len(failed)}")
 
     with tab_batch:
         st.subheader("批量获取字幕")
